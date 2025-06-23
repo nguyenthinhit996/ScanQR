@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Document Scanner with Azure Document Intelligence</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+    input, button { margin: 5px; padding: 8px 12px; font-size: 1em; }
+    img { margin-top: 10px; border: 1px solid #ccc; border-radius: 4px; width: 300px; }
+    textarea { width: 90%; max-width: 600px; height: 200px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Document Scanner Demo</h1>
+
+  <!-- API Key input -->
+  <div>
+    <input type="text" id="apiKeyInput" placeholder="Enter your Azure Document Intelligence API Key" />
+    <button id="setKeyBtn">Set API Key</button>
+  </div>
+
+  <!-- File input for document -->
+  <div>
+    <input type="file" id="fileInput" accept="image/*" />
+    <button id="scanBtn" disabled>Scan Document</button>
+  </div>
+
+  <!-- Image preview -->
+  <img id="imagePreview" alt="Selected document preview" />
+  
+  <!-- Output and API response -->
+  <textarea id="fullResponse" readonly placeholder="Full API JSON response will appear here"></textarea>
+
+  <script>
+    let apiKey = '';
+    const endpoint = 'https://eastus.api.cognitive.microsoft.com/formrecognizer/v2.1/prebuilt/idDocument/analyze'; // Correct endpoint
+    const setKeyBtn = document.getElementById('setKeyBtn');
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const fileInput = document.getElementById('fileInput');
+    const scanBtn = document.getElementById('scanBtn');
+    const imagePreview = document.getElementById('imagePreview');
+    const fullResponse = document.getElementById('fullResponse');
+
+    // Function to process the uploaded document
+    async function scanDocument() {
+  const file = fileInput.files[0];
+  if (!file) {
+    alert('Please select a document.');
+    return;
+  }
+
+  imagePreview.src = URL.createObjectURL(file); // Display selected image
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Ocp-Apim-Subscription-Key': apiKey
+      },
+      body: formData // Send the image as multipart form-data
+    });
+
+    // Log the status code and response text for debugging
+    const responseText = await response.text();
+    console.log('Response Status:', response.status);
+    console.log('Response Text:', responseText);
+
+    // If response is not OK, throw an error with the message
+    if (!response.ok) {
+      throw new Error(`Error: ${response.statusText} - ${responseText}`);
+    }
+
+    // Parse the response as JSON
+    const result = JSON.parse(responseText);
+    fullResponse.value = JSON.stringify(result, null, 2);
+
+    // Process and display the result from Document Intelligence API
+    if (result.status === 'succeeded') {
+      const documents = result.analyzeResult?.documents || [];
+      if (documents.length > 0) {
+        const document = documents[0];
+        if (document.docType === "idDocument.driverLicense") {
+          const { FirstName, LastName, DocumentNumber, DateOfBirth, DateOfExpiration } = document.fields;
+          console.log("Extracted a Driver License:");
+          console.log("  Name:", FirstName && FirstName.valueString, LastName && LastName.valueString);
+          console.log("  License No.:", DocumentNumber && DocumentNumber.valueDate);
+          console.log("  Date of Birth:", DateOfBirth && DateOfBirth.valueDate);
+          console.log("  Expiration:", DateOfExpiration && DateOfExpiration.valueDate);
+        } else if (document.docType === "idDocument.passport") {
+          const { FirstName, LastName, DateOfBirth, Nationality, DocumentNumber, CountryRegion, DateOfExpiration } = document.fields;
+          console.log("Extracted a Passport:");
+          console.log("  Name:", FirstName && FirstName.valueString, LastName && LastName.valueString);
+          console.log("  Date of Birth:", DateOfBirth && DateOfBirth.valueDate);
+          console.log("  Nationality:", Nationality && Nationality.valueCountryRegion);
+          console.log("  Passport No.:", DocumentNumber && DocumentNumber.valueString);
+          console.log("  Issuer:", CountryRegion && CountryRegion.valueCountryRegion);
+          console.log("  Expiration Date:", DateOfExpiration && DateOfExpiration.valueDate);
+        }
+      } else {
+        console.log("No documents detected.");
+      }
+    } else {
+      console.error("Error processing document:", result);
+    }
+  } catch (error) {
+    console.error("An error occurred:", error);
+    fullResponse.value = `Error: ${error.message}`;
+  }
+}
+
+    // Set the API key
+    setKeyBtn.addEventListener('click', () => {
+      const key = apiKeyInput.value.trim();
+      if (!key) { alert('Please enter a valid API key.'); return; }
+      apiKey = key;
+      apiKeyInput.disabled = true;
+      setKeyBtn.disabled = true;
+      scanBtn.disabled = false;
+    });
+
+    // Trigger document scanning when the button is clicked
+    scanBtn.addEventListener('click', () => {
+      scanDocument();
+    });
+  </script>
+</body>
+</html>
