@@ -20,97 +20,112 @@
     <button id="setKeyBtn">Set API Key</button>
   </div>
 
-  <!-- File input for document -->
+  <!-- URL input for document -->
   <div>
-    <input type="file" id="fileInput" accept="image/*" />
+    <input type="text" id="documentUrlInput" placeholder="Enter URL of document to analyze" />
     <button id="scanBtn" disabled>Scan Document</button>
   </div>
 
-  <!-- Image preview -->
-  <img id="imagePreview" alt="Selected document preview" />
-  
   <!-- Output and API response -->
   <textarea id="fullResponse" readonly placeholder="Full API JSON response will appear here"></textarea>
 
+  <!-- Button to Get Result from Operation-Location -->
+  <div>
+    <button id="getResultBtn" disabled>Get Result</button>
+  </div>
+
   <script>
     let apiKey = '';
-    const endpoint = 'https://eastus.api.cognitive.microsoft.com/formrecognizer/v2.1/prebuilt/idDocument/analyze'; // Correct endpoint
+    const endpoint = 'https://readidcard.cognitiveservices.azure.com/'; // Correct endpoint
     const setKeyBtn = document.getElementById('setKeyBtn');
     const apiKeyInput = document.getElementById('apiKeyInput');
-    const fileInput = document.getElementById('fileInput');
+    const documentUrlInput = document.getElementById('documentUrlInput');
     const scanBtn = document.getElementById('scanBtn');
-    const imagePreview = document.getElementById('imagePreview');
+    const getResultBtn = document.getElementById('getResultBtn');
     const fullResponse = document.getElementById('fullResponse');
+    let operationLocation = '';
 
     // Function to process the uploaded document
     async function scanDocument() {
-  const file = fileInput.files[0];
-  if (!file) {
-    alert('Please select a document.');
-    return;
-  }
-
-  imagePreview.src = URL.createObjectURL(file); // Display selected image
-
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Ocp-Apim-Subscription-Key': apiKey
-      },
-      body: formData // Send the image as multipart form-data
-    });
-
-    // Log the status code and response text for debugging
-    const responseText = await response.text();
-    console.log('Response Status:', response.status);
-    console.log('Response Text:', responseText);
-
-    // If response is not OK, throw an error with the message
-    if (!response.ok) {
-      throw new Error(`Error: ${response.statusText} - ${responseText}`);
-    }
-
-    // Parse the response as JSON
-    const result = JSON.parse(responseText);
-    fullResponse.value = JSON.stringify(result, null, 2);
-
-    // Process and display the result from Document Intelligence API
-    if (result.status === 'succeeded') {
-      const documents = result.analyzeResult?.documents || [];
-      if (documents.length > 0) {
-        const document = documents[0];
-        if (document.docType === "idDocument.driverLicense") {
-          const { FirstName, LastName, DocumentNumber, DateOfBirth, DateOfExpiration } = document.fields;
-          console.log("Extracted a Driver License:");
-          console.log("  Name:", FirstName && FirstName.valueString, LastName && LastName.valueString);
-          console.log("  License No.:", DocumentNumber && DocumentNumber.valueDate);
-          console.log("  Date of Birth:", DateOfBirth && DateOfBirth.valueDate);
-          console.log("  Expiration:", DateOfExpiration && DateOfExpiration.valueDate);
-        } else if (document.docType === "idDocument.passport") {
-          const { FirstName, LastName, DateOfBirth, Nationality, DocumentNumber, CountryRegion, DateOfExpiration } = document.fields;
-          console.log("Extracted a Passport:");
-          console.log("  Name:", FirstName && FirstName.valueString, LastName && LastName.valueString);
-          console.log("  Date of Birth:", DateOfBirth && DateOfBirth.valueDate);
-          console.log("  Nationality:", Nationality && Nationality.valueCountryRegion);
-          console.log("  Passport No.:", DocumentNumber && DocumentNumber.valueString);
-          console.log("  Issuer:", CountryRegion && CountryRegion.valueCountryRegion);
-          console.log("  Expiration Date:", DateOfExpiration && DateOfExpiration.valueDate);
-        }
-      } else {
-        console.log("No documents detected.");
+      const documentUrl = documentUrlInput.value.trim();
+      if (!documentUrl) {
+        alert('Please enter a document URL.');
+        return;
       }
-    } else {
-      console.error("Error processing document:", result);
+
+      const requestBody = JSON.stringify({
+        urlSource: documentUrl // Use the URL of the document
+      });
+
+      try {
+        const response = await fetch(`${endpoint}documentintelligence/documentModels/prebuilt-idDocument:analyze?_overload=analyzeDocument&api-version=2024-11-30`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Ocp-Apim-Subscription-Key': apiKey
+          },
+          body: requestBody
+        });
+
+        // Get the Operation-Location header
+        operationLocation = response.headers.get('Operation-Location');
+        console.log('Operation-Location:', operationLocation);
+        if (operationLocation) {
+          console.log('Operation Location URL:', operationLocation);
+          // Enable the "Get Result" button
+          getResultBtn.disabled = false;
+        } else {
+          console.error('No Operation-Location header found.');
+        }
+      } catch (error) {
+        console.error('An error occurred:', error);
+        fullResponse.value = `Error: ${error.message}`;
+      }
     }
-  } catch (error) {
-    console.error("An error occurred:", error);
-    fullResponse.value = `Error: ${error.message}`;
-  }
-}
+
+    // Function to get the result from Operation-Location
+    async function getResult() {
+      if (!operationLocation) {
+        alert('No Operation-Location URL found. Please scan a document first.');
+        return;
+      }
+
+      try {
+        const response = await fetch(operationLocation, {
+          method: 'GET',
+          headers: {
+            'Ocp-Apim-Subscription-Key': apiKey,
+          },
+        });
+
+        const responseText = await response.text();
+        console.log('Polling Response Status:', response.status);
+        console.log('Polling Response Text:', responseText);
+
+        // If response is not OK, throw an error with the message
+        if (!response.ok) {
+          throw new Error(`Error: ${response.statusText} - ${responseText}`);
+        }
+
+        // Parse the response as JSON
+        const result = JSON.parse(responseText);
+        fullResponse.value = JSON.stringify(result, null, 2);
+
+        // Check if the document analysis is completed
+        if (result.status === 'succeeded') {
+          console.log('Document analysis succeeded:', result);
+        } else if (result.status === 'failed') {
+          console.log('Document analysis failed:', result);
+        } else {
+          console.log('Document analysis is still in progress...');
+          // Optionally, keep polling until the analysis is complete (for real-time updates)
+          setTimeout(() => getResult(), 3000); // Poll every 3 seconds
+        }
+      } catch (error) {
+        console.error('An error occurred while polling:', error);
+        fullResponse.value = `Error: ${error.message}`;
+      }
+    }
 
     // Set the API key
     setKeyBtn.addEventListener('click', () => {
@@ -125,6 +140,11 @@
     // Trigger document scanning when the button is clicked
     scanBtn.addEventListener('click', () => {
       scanDocument();
+    });
+
+    // Trigger result fetching when the "Get Result" button is clicked
+    getResultBtn.addEventListener('click', () => {
+      getResult();
     });
   </script>
 </body>
